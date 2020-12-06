@@ -1,0 +1,5 @@
+-
+  name: "reboot the servers"
+  hosts: Web
+  roles:
+    - reboot

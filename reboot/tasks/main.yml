@@ -1,0 +1,15 @@
+---
+# tasks file for reboot
+
+
+    - name: "rebooting all the {{ ansible_host }}"
+      reboot:
+    - block:
+        - wait_for_connection:
+            sleep: 1
+            timeout: 10
+    - name: "check if the machine is UP"
+      ping:
+      register: ping_out
+    - debug:
+        msg: '{{ ansible_host }} {{ ping_out }}'
