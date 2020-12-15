@@ -1,0 +1,113 @@
+-
+  name: "ping"
+  hosts: all
+  gather_facts: yes
+  vars:
+    Service_File_path: root/Ansible_output
+  any_errors_fatal: true
+  tasks:
+
+    - name: "check if the server is active"
+      ping:
+      register: output
+
+    - name: Creates Service_File_path directory
+      file:
+        path: '/{{ Service_File_path }}'
+        state: directory
+
+    - name: "remove pre reboot running processes file before getting the process"
+      shell: rm -rf /{{ Service_File_path }}/services_precheck_{{ ansible_host }}.txt
+
+    - name: "get pre reboot running processes"
+      shell: systemctl --type=service --state=running > /{{ Service_File_path }}/services_precheck_{{ ansible_host }}.txt
+
+    - name: "fetch the number of processors before reboot"
+      shell: cat /proc/cpuinfo | grep processor | sed 's/\t/ /g' | tee -a /{{ Service_File_path }}/services_precheck_{{ ansible_host }}.txt
+      register: Processor_count
+
+    - debug:
+        msg: '{{ Processor_count.stdout }}'
+
+
+    - name: "print the services"
+      shell: cat /{{ Service_File_path }}/services_precheck_{{ ansible_host }}.txt
+      register: Pre_Check_Services_output
+
+    - debug:
+        msg: '{{ Pre_Check_Services_output }}'
+
+
+    - name: "reboot the servers {{ ansible_host }}"
+      reboot:
+
+
+    - name: Wait 300 seconds, but only start checking after 60 seconds
+      wait_for_connection:
+         delay: 30
+         timeout: 300
+
+    - name: "stop docker process"
+      service:
+       name: docker
+       state: stopped
+      failed_when: "false"
+
+    - name: "remove pre reboot running processes file before getting the process"
+      shell: rm -rf /{{ Service_File_path }}/services_postcheck_{{ ansible_host }}.txt
+
+    - name: "get post reboot running processes"
+      shell: systemctl --type=service --state=running > /{{ Service_File_path }}/services_postcheck_{{ ansible_host }}.txt
+
+
+    - name: "fetch the number of processors after reboot"
+      shell: cat /proc/cpuinfo | grep processor | sed 's/\t/ /g' | tee -a /{{ Service_File_path }}/services_postcheck_{{ ansible_host }}.txt
+      register: Processor_count
+
+    - debug:
+        msg: '{{ Processor_count.stdout }}'
+
+
+    - name: "compare precheck and post check services"
+      shell: diff --ignore-all-space --suppress-common-lines /{{ Service_File_path }}/services_precheck_{{ ansible_host }}.txt /{{ Service_File_path }}/services_postcheck_{{ ansible_host }}.txt | awk {'print $2"  "$5'} | sed '/^[[:space:]]*$/d' | sed 's/running/ /'
+      register: post_check_service
+      failed_when: "false"
+
+    - name: "write output to pre post check file "
+      shell: |
+           echo -e "{{ ansible_host }}"  > /{{ Service_File_path }}/PrePostChecks-{{ ansible_host }}-info.txt
+           echo -e "{{ post_check_service.stdout_lines }}" | sed 's/,/\n/g' | sed 's/u/ /g' >> /{{ Service_File_path }}/PrePostChecks-{{ ansible_host }}-info.txt
+           echo " ---------------------" >> /{{ Service_File_path }}/PrePostChecks-{{ ansible_host }}-info.txt
+
+    - name: "print the services"
+      shell: cat /{{ Service_File_path }}/PrePostChecks-{{ ansible_host }}-info.txt
+      register: Post_Check_Services_output
+
+    - debug:
+        msg: '{{ Post_Check_Services_output }}'
+
+    - name: " fetch all ther server services output"
+      fetch:
+        src: /{{ Service_File_path }}/PrePostChecks-{{ ansible_host }}-info.txt
+        dest: /root/ANSIBLE_PLAYBOOKS/Service_info/
+        flat: yes
+
+
+
+
+
+-
+  name: merge all the file in csv fail
+  hosts: localhost
+  vars:
+    Service_File_path: root/Ansible_output
+  tasks:
+
+    - name: remove file before merging
+      shell: rm -rf /root/ANSIBLE_PLAYBOOKS/Service_info/prepostcheck_info.csv state=absent
+
+
+    - name: merge all the files in the folder
+      assemble:
+        src: /root/ANSIBLE_PLAYBOOKS/Service_info
+        dest: /root/ANSIBLE_PLAYBOOKS/Service_info/prepostcheck_info.csv
